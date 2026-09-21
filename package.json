@@ -1,0 +1,12 @@
+{
+  "name": "shinycolors-yonkoma-archive",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Xで連載中の四コマ漫画のリンク台帳（静的サイト・依存なし）",
+  "scripts": {
+    "add": "node scripts/add.mjs",
+    "refresh": "node scripts/add.mjs --refresh",
+    "serve": "node scripts/serve.mjs"
+  }
+}
