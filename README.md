@@ -13,6 +13,7 @@ Xで連載中の四コマ漫画を、話数ごとにリンクだけ索引する�
 |---|---|
 | `episodes.json` | **唯一の正データ** |
 | `index.html` | サイト本体（バニラJS） |
+| `style.css` | スタイルシート |
 | `scripts/add.mjs` | 台帳への取り込み |
 | `lib/tweet.mjs` | ツイート取得・本文パース |
 | `scripts/serve.mjs` | 動作確認用の簡易サーバ |
