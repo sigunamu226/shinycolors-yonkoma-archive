@@ -1,0 +1,274 @@
+"use strict";
+
+const BLOCK_SIZE = 50;
+const SHOW_LINK_AFTER_MS = 8000;   // これを過ぎたら暫定でリンクを出す（監視は継続）
+const MIN_RENDERED_HEIGHT = 20;    // これ以上の高さが付いたら描画成功とみなす
+
+let episodes = [];
+let currentBlockIndex = 0;
+
+/* ---------- 話数ブロックの区切り ----------
+   ブロック0 は 0〜50（第0話を含むので51枠）。
+   以降は 51〜100, 101〜150 ... と50話刻み。 */
+function blockBounds(index) {
+  if (index === 0) return { start: 0, end: 50 };
+  const start = 51 + (index - 1) * BLOCK_SIZE;
+  return { start, end: start + BLOCK_SIZE - 1 };
+}
+
+function blockIndexForNum(num) {
+  return num <= 50 ? 0 : Math.floor((num - 51) / BLOCK_SIZE) + 1;
+}
+
+/* ---------- X公式ウィジェット ---------- */
+let widgetsPromise = null;
+function loadWidgets() {
+  if (widgetsPromise) return widgetsPromise;
+  widgetsPromise = new Promise((resolve, reject) => {
+    if (window.twttr && window.twttr.widgets) return resolve(window.twttr);
+    const script = document.createElement("script");
+    script.src = "https://platform.x.com/widgets.js";
+    script.async = true;
+    script.onload = () =>
+      window.twttr && window.twttr.widgets
+        ? resolve(window.twttr)
+        : reject(new Error("twttr の初期化に失敗しました"));
+    script.onerror = () => reject(new Error("widgets.js を読み込めませんでした"));
+    document.body.appendChild(script);
+  });
+  return widgetsPromise;
+}
+
+/* ---------- 埋め込みの状態管理 ----------
+   createTweet の Promise は当てにしない。埋め込みが描画されても解決しない
+   ことがあるため、「ホストに実際の高さが付いたか」を唯一の成功判定とする。
+   時間切れは失敗ではなく暫定表示。遅れて描画されたら埋め込みに戻す。 */
+function setKomaState(koma, state) {
+  koma.dataset.embedState = state;
+  const note = koma.querySelector(".loading-note");
+  const link = koma.querySelector(".tweet-link");
+  const showLink = state === "fallback" || state === "failed";
+  note.hidden = state !== "idle" && state !== "loading";
+  link.hidden = !showLink;
+}
+
+function mountEmbed(koma) {
+  const host = koma.querySelector(".embed-host");
+  const tweetId = koma.dataset.tweetId;
+  let timer = null;
+  let resizeObserver = null;
+
+  const stopWatching = () => {
+    if (timer) clearTimeout(timer);
+    if (resizeObserver) resizeObserver.disconnect();
+  };
+
+  const succeed = () => {
+    stopWatching();
+    setKomaState(koma, "done");
+  };
+
+  // 削除済みツイートやスクリプト読み込み失敗など、確定的な失敗のみDOMを片付ける
+  const hardFail = () => {
+    stopWatching();
+    host.innerHTML = "";
+    setKomaState(koma, "failed");
+  };
+
+  setKomaState(koma, "loading");
+
+  resizeObserver = new ResizeObserver(() => {
+    if (host.offsetHeight >= MIN_RENDERED_HEIGHT) succeed();
+  });
+  resizeObserver.observe(host);
+
+  timer = setTimeout(() => {
+    if (host.offsetHeight >= MIN_RENDERED_HEIGHT) succeed();
+    else setKomaState(koma, "fallback"); // 監視は続けたままリンクを先に出す
+  }, SHOW_LINK_AFTER_MS);
+
+  loadWidgets()
+    .then((twttr) =>
+      twttr.widgets.createTweet(tweetId, host, {
+        theme: "light",
+        dnt: true,
+        conversation: "none",
+        align: "center",
+      })
+    )
+    .then((el) => {
+      if (!el) hardFail();
+    })
+    .catch(hardFail);
+}
+
+/* 画面に入ったコマだけ埋め込む。50枚を一度に読むと重いため。 */
+const lazyObserver = new IntersectionObserver(
+  (entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      lazyObserver.unobserve(entry.target);
+      mountEmbed(entry.target);
+    }
+  },
+  { rootMargin: "300px" }
+);
+
+/* ---------- 描画 ---------- */
+function buildKoma(ep, isLatest) {
+  const koma = document.createElement("div");
+  koma.className = "koma" + (isLatest ? " latest" : "");
+  koma.dataset.tweetId = ep.id;
+  koma.dataset.embedState = "idle";
+
+  const header = document.createElement("div");
+  header.className = "koma-header";
+
+  const label = document.createElement("div");
+  label.className = "koma-label";
+
+  const num = document.createElement("div");
+  num.className = "koma-num";
+  num.textContent = ep.num === 0 ? "0話" : "第" + ep.num + "話";
+  label.appendChild(num);
+
+  if (ep.title) {
+    const title = document.createElement("div");
+    title.className = "koma-title";
+    title.textContent = "『" + ep.title + "』";
+    label.appendChild(title);
+  }
+  header.appendChild(label);
+
+  if (ep.date) {
+    const date = document.createElement("div");
+    date.className = "date";
+    date.textContent = ep.date;
+    header.appendChild(date);
+  }
+  koma.appendChild(header);
+
+  const embed = document.createElement("div");
+  embed.className = "koma-embed";
+
+  // widgets.js がDOMを直接書き換える領域
+  const host = document.createElement("div");
+  host.className = "embed-host";
+  embed.appendChild(host);
+
+  const note = document.createElement("span");
+  note.className = "loading-note";
+  note.textContent = "ツイートを読み込み中…";
+  embed.appendChild(note);
+
+  const link = document.createElement("a");
+  link.className = "tweet-link";
+  link.href = ep.url;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.hidden = true;
+  const linkText = document.createElement("span");
+  linkText.textContent = "ツイートを見る ↗";
+  link.appendChild(linkText);
+  embed.appendChild(link);
+
+  koma.appendChild(embed);
+  lazyObserver.observe(koma);
+  return koma;
+}
+
+function render() {
+  const toc = document.getElementById("tocNav");
+  const container = document.getElementById("rangesContainer");
+  toc.innerHTML = "";
+  container.innerHTML = "";
+
+  if (!episodes.length) return;
+
+  const latestNum = episodes[episodes.length - 1].num;
+  const highestBlock = blockIndexForNum(latestNum);
+
+  for (let i = 0; i <= highestBlock; i++) {
+    const b = blockBounds(i);
+    const btn = document.createElement("button");
+    btn.textContent = b.start + "〜" + b.end + "話";
+    if (i === currentBlockIndex) btn.className = "active";
+    btn.addEventListener("click", () => {
+      currentBlockIndex = i;
+      render();
+    });
+    toc.appendChild(btn);
+  }
+
+  const bounds = blockBounds(currentBlockIndex);
+  const items = episodes.filter((e) => e.num >= bounds.start && e.num <= bounds.end);
+
+  const section = document.createElement("section");
+  section.className = "range";
+
+  const head = document.createElement("div");
+  head.className = "range-head";
+  const rangeNum = document.createElement("span");
+  rangeNum.className = "range-num";
+  rangeNum.textContent = bounds.start + "〜" + bounds.end + "話";
+  const count = document.createElement("span");
+  count.className = "range-count";
+  count.textContent =
+    "収集済み " + items.length + " / " + (bounds.end - bounds.start + 1);
+  head.appendChild(rangeNum);
+  head.appendChild(count);
+  section.appendChild(head);
+
+  const grid = document.createElement("div");
+  grid.className = "komas";
+
+  for (let n = bounds.start; n <= bounds.end; n++) {
+    const ep = items.find((i) => i.num === n);
+    if (ep) {
+      grid.appendChild(buildKoma(ep, ep.num === latestNum));
+    } else {
+      const empty = document.createElement("div");
+      empty.className = "koma empty-slot";
+      empty.textContent = n + "話 未収集";
+      grid.appendChild(empty);
+    }
+  }
+
+  section.appendChild(grid);
+  container.appendChild(section);
+}
+
+function showNotice(message) {
+  const el = document.getElementById("notice");
+  el.textContent = message;
+  el.hidden = false;
+}
+
+/* ---------- 起動 ----------
+   GitHub Pages ではサブパス配信になるため、必ず相対パスで読むこと。 */
+async function init() {
+  let raw;
+  try {
+    const res = await fetch("./episodes.json", { cache: "no-cache" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    raw = await res.json();
+  } catch (err) {
+    showNotice("台帳データを読み込めませんでした（" + err.message + "）。");
+    return;
+  }
+
+  episodes = raw
+    .filter((e) => e && typeof e.num === "number" && e.id && e.url)
+    .sort((a, b) => a.num - b.num);
+
+  if (!episodes.length) {
+    showNotice("まだ登録された話がありません。");
+    return;
+  }
+
+  // 既定では最新話を含むブロックを開く
+  currentBlockIndex = blockIndexForNum(episodes[episodes.length - 1].num);
+  render();
+}
+
+init();
