@@ -40,7 +40,7 @@ h1 {
   letter-spacing: 0.03em;
 }
 
-.lede { max-width: 46ch; color: var(--ink-soft); font-size: 15px; margin: 0; }
+.lede { color: var(--ink-soft); font-size: 15px; margin: 0; word-break: auto-phrase; }
 
 main { max-width: 880px; margin: 0 auto; padding: 0 24px; }
 
