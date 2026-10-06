@@ -4,8 +4,56 @@ const BLOCK_SIZE = 50;
 const SHOW_LINK_AFTER_MS = 8000;   // これを過ぎたら暫定でリンクを出す（監視は継続）
 const MIN_RENDERED_HEIGHT = 20;    // これ以上の高さが付いたら描画成功とみなす
 
+/* ---------- 絞り込みの名簿 ----------
+   パネルでの並べ方を決めるだけの表。ここに無い subject は「その他」に入る。
+   ユニット回の subject は "SHHis(シーズ)" のように表記が揺れるので、
+   ユニット名を含むかどうかで判定する。 */
+const UNITS = [
+  { name: "イルミネーションスターズ", members: ["櫻木 真乃", "風野 灯織", "八宮 めぐる"] },
+  { name: "アンティーカ", members: ["月岡 恋鐘", "田中 摩美々", "白瀬 咲耶", "三峰 結華", "幽谷 霧子"] },
+  { name: "放課後クライマックスガールズ", members: ["小宮 果穂", "園田 智代子", "西城 樹里", "杜野 凛世", "有栖川 夏葉"] },
+  { name: "アルストロメリア", members: ["大崎 甘奈", "大崎 甜花", "桑山 千雪"] },
+  { name: "ストレイライト", members: ["芹沢 あさひ", "黛 冬優子", "和泉 愛依"] },
+  { name: "ノクチル", members: ["浅倉 透", "樋口 円香", "福丸 小糸", "市川 雛菜"] },
+  { name: "シーズ", members: ["七草 にちか", "緋田 美琴"] },
+  { name: "コメティック", members: ["斑鳩 ルカ", "鈴木 羽那", "郁田 はるき"] },
+];
+const OTHER_PEOPLE = ["七草 はづき"];
+const OTHER_KEY = "その他";
+const OTHER_LABEL = "イベント・全体回など";
+
 let episodes = [];
 let currentBlockIndex = 0;
+let currentFilter = null; // null | ユニット名 | 人名 | OTHER_KEY
+let filterOpen = false;
+let filterCounts = new Map();
+
+/* subject を絞り込みのキー（ユニット名・人名・その他）に寄せる。 */
+function filterKeyFor(subject) {
+  const s = subject || "";
+  if (OTHER_PEOPLE.includes(s)) return s;
+  for (const unit of UNITS) {
+    if (unit.members.includes(s)) return s;
+  }
+  for (const unit of UNITS) {
+    if (s.includes(unit.name)) return unit.name;
+  }
+  return OTHER_KEY;
+}
+
+function filterLabel(key) {
+  return key === OTHER_KEY ? OTHER_LABEL : key;
+}
+
+function setFilter(key) {
+  currentFilter = key;
+  filterOpen = false;
+  const url = new URL(location.href);
+  if (key) url.searchParams.set("subject", key);
+  else url.searchParams.delete("subject");
+  history.replaceState(null, "", url);
+  render();
+}
 
 /* ---------- 話数ブロックの区切り ----------
    ブロック0 は 0〜50（第0話を含むので51枠）。
@@ -148,6 +196,16 @@ function buildKoma(ep, isLatest) {
   }
   koma.appendChild(header);
 
+  if (ep.subject) {
+    const subject = document.createElement("button");
+    subject.type = "button";
+    subject.className = "koma-subject";
+    subject.textContent = ep.filterKey === OTHER_KEY ? ep.subject : ep.filterKey;
+    subject.title = filterLabel(ep.filterKey) + "で絞り込む";
+    subject.addEventListener("click", () => setFilter(ep.filterKey));
+    koma.appendChild(subject);
+  }
+
   const embed = document.createElement("div");
   embed.className = "koma-embed";
 
@@ -177,6 +235,104 @@ function buildKoma(ep, isLatest) {
   return koma;
 }
 
+function buildFilterName(key, extraClass) {
+  const count = filterCounts.get(key) || 0;
+  if (!count) {
+    const span = document.createElement("span");
+    span.className = "filter-name disabled" + (extraClass ? " " + extraClass : "");
+    span.textContent = filterLabel(key);
+    return span;
+  }
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className =
+    "filter-name" + (extraClass ? " " + extraClass : "") + (key === currentFilter ? " current" : "");
+  btn.textContent = filterLabel(key);
+  const small = document.createElement("small");
+  small.textContent = count;
+  btn.appendChild(small);
+  btn.addEventListener("click", () => setFilter(key));
+  return btn;
+}
+
+function buildFilterRow(headCell, keys) {
+  const members = document.createElement("div");
+  members.className = "filter-members";
+  for (const key of keys) members.appendChild(buildFilterName(key));
+  return [headCell, members];
+}
+
+function renderFilter() {
+  const bar = document.getElementById("filterBar");
+  bar.innerHTML = "";
+
+  const controls = document.createElement("div");
+  controls.className = "filter-controls";
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "filter-toggle";
+  toggle.setAttribute("aria-expanded", String(filterOpen));
+  toggle.textContent =
+    (currentFilter ? "変更" : "誰のお話かで絞り込む") + (filterOpen ? " ▴" : " ▾");
+  toggle.addEventListener("click", () => {
+    filterOpen = !filterOpen;
+    renderFilter();
+  });
+  controls.appendChild(toggle);
+
+  if (currentFilter) {
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.className = "filter-current";
+    clear.textContent = filterLabel(currentFilter) + " ×";
+    clear.setAttribute("aria-label", filterLabel(currentFilter) + "の絞り込みを解除");
+    clear.addEventListener("click", () => setFilter(null));
+    controls.appendChild(clear);
+  }
+  bar.appendChild(controls);
+
+  if (!filterOpen) return;
+
+  const panel = document.createElement("div");
+  panel.className = "filter-panel";
+  for (const unit of UNITS) {
+    panel.append(...buildFilterRow(buildFilterName(unit.name, "filter-unit"), unit.members));
+  }
+  const otherHead = document.createElement("span");
+  otherHead.className = "filter-name disabled filter-unit";
+  otherHead.textContent = "その他";
+  panel.append(...buildFilterRow(otherHead, [...OTHER_PEOPLE, OTHER_KEY]));
+  bar.appendChild(panel);
+}
+
+/* 絞り込み中は話数レンジを使わず、該当する話を話数順に全件並べる。 */
+function renderFiltered(container, latestNum) {
+  const items = episodes.filter((e) => e.filterKey === currentFilter);
+
+  const section = document.createElement("section");
+  section.className = "range";
+
+  const head = document.createElement("div");
+  head.className = "range-head";
+  const rangeNum = document.createElement("span");
+  rangeNum.className = "range-num";
+  rangeNum.textContent =
+    currentFilter === OTHER_KEY ? OTHER_LABEL : currentFilter + "のお話";
+  const count = document.createElement("span");
+  count.className = "range-count";
+  count.textContent = items.length + "件";
+  head.appendChild(rangeNum);
+  head.appendChild(count);
+  section.appendChild(head);
+
+  const grid = document.createElement("div");
+  grid.className = "komas";
+  for (const ep of items) grid.appendChild(buildKoma(ep, ep.num === latestNum));
+  section.appendChild(grid);
+  container.appendChild(section);
+}
+
 function render() {
   const toc = document.getElementById("tocNav");
   const container = document.getElementById("rangesContainer");
@@ -185,7 +341,15 @@ function render() {
 
   if (!episodes.length) return;
 
+  renderFilter();
+
   const latestNum = episodes[episodes.length - 1].num;
+
+  toc.hidden = Boolean(currentFilter);
+  if (currentFilter) {
+    renderFiltered(container, latestNum);
+    return;
+  }
   const highestBlock = blockIndexForNum(latestNum);
 
   for (let i = 0; i <= highestBlock; i++) {
@@ -266,8 +430,17 @@ async function init() {
     return;
   }
 
+  for (const ep of episodes) {
+    ep.filterKey = filterKeyFor(ep.subject);
+    filterCounts.set(ep.filterKey, (filterCounts.get(ep.filterKey) || 0) + 1);
+  }
+
   // 既定では最新話を含むブロックを開く
   currentBlockIndex = blockIndexForNum(episodes[episodes.length - 1].num);
+
+  // ?subject=大崎 甘奈 のようなURLで絞り込み済みの状態を開けるようにする
+  const requested = new URLSearchParams(location.search).get("subject");
+  if (requested && filterCounts.has(requested)) currentFilter = requested;
   render();
 }
 

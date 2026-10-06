@@ -69,6 +69,67 @@ nav.toc button.active {
   color: var(--paper-card);
 }
 
+.filter { margin-top: 28px; }
+.filter + nav.toc { margin-top: 14px; }
+
+.filter-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.filter-toggle,
+.filter-current {
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  border: 1px solid var(--line);
+  padding: 6px 14px;
+  background: var(--paper-card);
+}
+.filter-toggle:hover { border-color: var(--stamp); color: var(--stamp); }
+.filter-current {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper-card);
+}
+.filter-current:hover { background: var(--stamp); border-color: var(--stamp); }
+
+/* 行ごとに別のグリッドにすると長いユニット名だけ折り返して段がズレるので、
+   パネル全体を1つのグリッドにして左列の幅を最長のユニット名に揃える。 */
+.filter-panel {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  margin-top: 8px;
+  padding: 4px 16px;
+  background: var(--paper-card);
+  border: 1px solid var(--line);
+}
+.filter-panel > * { padding: 8px 0; border-top: 1px solid var(--line); }
+.filter-panel > :nth-child(-n + 2) { border-top: 0; }
+.filter-panel > .filter-unit { padding-right: 20px; }
+.filter-members { display: flex; flex-wrap: wrap; gap: 2px 16px; }
+
+.filter-name {
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  white-space: nowrap;
+}
+button.filter-name { cursor: pointer; }
+button.filter-name:hover { color: var(--stamp); }
+.filter-name.current { font-weight: 700; text-decoration: underline; text-underline-offset: 4px; }
+.filter-name.disabled { color: var(--ink-soft); }
+.filter-name small { font-size: 11px; font-weight: 400; color: var(--ink-soft); margin-left: 3px; }
+.filter-unit { font-family: "Shippori Mincho", serif; }
+
+@media (max-width: 560px) {
+  .filter-panel { grid-template-columns: minmax(0, 1fr); }
+  .filter-panel > .filter-members { border-top: 0; padding-top: 0; }
+  .filter-panel > :nth-child(2) { padding-top: 0; }
+}
+
 section.range { margin-top: 44px; }
 
 .range-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 18px; }
@@ -110,6 +171,21 @@ section.range { margin-top: 44px; }
 }
 .koma-title { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .koma .date { font-size: 11px; color: var(--ink-soft); white-space: nowrap; }
+.koma-subject {
+  align-self: flex-start;
+  max-width: 100%;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  border: 1px solid var(--line);
+  padding: 1px 8px;
+  background: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.koma-subject:hover { border-color: var(--stamp); color: var(--stamp); }
 
 /* widgets.js は親が flex だと iframe に width:0 / flex-grow:1 を当てて
    埋め込みを潰す。埋め込みホストは必ずブロック要素にしておくこと。 */
