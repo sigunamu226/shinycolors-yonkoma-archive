@@ -3,7 +3,7 @@
  * 台帳にエピソードを追加する。
  *
  *   npm run add -- <URL または ID> [...]
- *   npm run add -- <URL> --num 123 --title "タイトル"   # 自動判定の上書き
+ *   npm run add -- <URL> --num 123 --title "タイトル" --subject "〇〇"   # 自動判定の上書き
  *   npm run refresh                                      # 既存全件のメタを取り直す
  *
  * episodes.json が唯一の正データ。人が叩いてもcronが叩いても結果は同じ。
@@ -24,6 +24,7 @@ function parseArgs(argv) {
     if (a === "--refresh") opts.refresh = true;
     else if (a === "--num") opts.num = Number(argv[++i]);
     else if (a === "--title") opts.title = argv[++i];
+    else if (a === "--subject") opts.subject = argv[++i];
     else if (a === "--dry-run") opts.dryRun = true;
     else if (a.startsWith("--")) throw new Error(`不明なオプション: ${a}`);
     else targets.push(a);
@@ -46,6 +47,18 @@ async function writeLedger(list) {
   return sorted;
 }
 
+/**
+ * 初期のツイートは「大崎甘奈」、以降は「大崎 甘奈」と空白の有無が揺れている。
+ * 台帳に空白違いの同名があれば、空白入りの表記に寄せる。
+ */
+function canonicalSubject(subject, ledger) {
+  const squash = (s) => s.replace(/\s+/g, "");
+  const key = squash(subject || "");
+  if (!key) return "";
+  const same = ledger.map((e) => e.subject || "").filter((s) => squash(s) === key);
+  return [subject, ...same].sort((a, b) => b.length - a.length)[0];
+}
+
 async function main() {
   const { targets, opts } = parseArgs(process.argv.slice(2));
   const ledger = await readLedger();
@@ -54,8 +67,9 @@ async function main() {
     let changed = 0;
     for (const ep of ledger) {
       const fresh = await buildEntry(ep.id, { num: ep.num });
-      if (fresh.title !== ep.title || fresh.date !== ep.date) {
-        console.log(`更新 第${ep.num}話: ${ep.title || "(無題)"} -> ${fresh.title || "(無題)"} / ${ep.date} -> ${fresh.date}`);
+      fresh.subject = canonicalSubject(fresh.subject, ledger);
+      if (fresh.title !== ep.title || fresh.date !== ep.date || fresh.subject !== ep.subject) {
+        console.log(`更新 第${ep.num}話: ${ep.title || "(無題)"} -> ${fresh.title || "(無題)"} / ${ep.date} -> ${fresh.date} / ${ep.subject || "(なし)"} -> ${fresh.subject || "(なし)"}`);
         Object.assign(ep, fresh);
         changed++;
       }
@@ -69,8 +83,8 @@ async function main() {
     console.error("使い方: npm run add -- <ツイートURL> [--num N] [--title \"...\"]");
     process.exit(1);
   }
-  if (targets.length > 1 && (opts.num !== undefined || opts.title !== undefined)) {
-    console.error("--num / --title は1件ずつ指定してください。");
+  if (targets.length > 1 && (opts.num !== undefined || opts.title !== undefined || opts.subject !== undefined)) {
+    console.error("--num / --title / --subject は1件ずつ指定してください。");
     process.exit(1);
   }
 
@@ -107,10 +121,11 @@ async function main() {
       continue;
     }
 
+    entry.subject = canonicalSubject(entry.subject, ledger);
     ledger.push(entry);
     byId.set(id, entry);
     added++;
-    console.log(`✓ 第${entry.num}話「${entry.title || "無題"}」 ${entry.date}`);
+    console.log(`✓ 第${entry.num}話「${entry.title || "無題"}」 ${entry.subject || "(お話の対象なし)"} ${entry.date}`);
   }
 
   if (added === 0) {
